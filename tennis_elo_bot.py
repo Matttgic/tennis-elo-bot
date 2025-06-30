@@ -31,46 +31,82 @@ class TennisEloBot:
         """Charge les données ELO depuis les fichiers CSV"""
         try:
             # Chargement ATP ELO
-            atp_df = pd.read_csv(ATP_ELO_FILE)
+            logger.info(f"Chargement du fichier {ATP_ELO_FILE}...")
+            try:
+                # Lire le CSV en ignorant les colonnes vides
+                atp_df = pd.read_csv(ATP_ELO_FILE, encoding='utf-8')
+                # Supprimer les colonnes sans nom (Unnamed)
+                atp_df = atp_df.loc[:, ~atp_df.columns.str.contains('^Unnamed')]
+            except Exception as e:
+                logger.error(f"Erreur lors du chargement ATP: {e}")
+                atp_df = pd.DataFrame()
+                
+            logger.info(f"Fichier ATP chargé: {len(atp_df)} lignes")
             logger.info(f"Colonnes ATP trouvées: {list(atp_df.columns)}")
+            
+            # Filtrer les lignes qui contiennent les en-têtes dupliqués
+            if 'Player' in atp_df.columns:
+                atp_df = atp_df[atp_df['Player'] != 'Player']
             
             for _, row in atp_df.iterrows():
                 if pd.notna(row.get('Player')):
                     player_name = str(row['Player']).lower().strip()
                     
-                    # Récupération des ELO par surface avec valeurs par défaut
-                    overall_elo = row.get('Elo', 1500)
-                    hard_elo = row.get('hElo', overall_elo)
-                    clay_elo = row.get('cElo', overall_elo)
-                    grass_elo = row.get('gElo', overall_elo)
-                    
-                    self.atp_elo[player_name] = {
-                        'overall': float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'hard': float(hard_elo) if pd.notna(hard_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'clay': float(clay_elo) if pd.notna(clay_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'grass': float(grass_elo) if pd.notna(grass_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0
-                    }
+                    try:
+                        # Récupération des ELO par surface avec valeurs par défaut
+                        overall_elo = float(row.get('Elo', 1500)) if pd.notna(row.get('Elo')) else 1500.0
+                        hard_elo = float(row.get('hElo', overall_elo)) if pd.notna(row.get('hElo')) else overall_elo
+                        clay_elo = float(row.get('cElo', overall_elo)) if pd.notna(row.get('cElo')) else overall_elo
+                        grass_elo = float(row.get('gElo', overall_elo)) if pd.notna(row.get('gElo')) else overall_elo
+                        
+                        self.atp_elo[player_name] = {
+                            'overall': overall_elo,
+                            'hard': hard_elo,
+                            'clay': clay_elo,
+                            'grass': grass_elo
+                        }
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Erreur conversion pour {player_name}: {e}")
+                        continue
             
             # Chargement WTA ELO
-            wta_df = pd.read_csv(WTA_ELO_FILE)
+            logger.info(f"Chargement du fichier {WTA_ELO_FILE}...")
+            try:
+                # Lire le CSV en ignorant les colonnes vides
+                wta_df = pd.read_csv(WTA_ELO_FILE, encoding='utf-8')
+                # Supprimer les colonnes sans nom (Unnamed)
+                wta_df = wta_df.loc[:, ~wta_df.columns.str.contains('^Unnamed')]
+            except Exception as e:
+                logger.error(f"Erreur lors du chargement WTA: {e}")
+                wta_df = pd.DataFrame()
+                
+            logger.info(f"Fichier WTA chargé: {len(wta_df)} lignes")
             logger.info(f"Colonnes WTA trouvées: {list(wta_df.columns)}")
+            
+            # Filtrer les lignes qui contiennent les en-têtes dupliqués
+            if 'Player' in wta_df.columns:
+                wta_df = wta_df[wta_df['Player'] != 'Player']
             
             for _, row in wta_df.iterrows():
                 if pd.notna(row.get('Player')):
                     player_name = str(row['Player']).lower().strip()
                     
-                    # Récupération des ELO par surface avec valeurs par défaut
-                    overall_elo = row.get('Elo', 1500)
-                    hard_elo = row.get('hElo', overall_elo)
-                    clay_elo = row.get('cElo', overall_elo)
-                    grass_elo = row.get('gElo', overall_elo)
-                    
-                    self.wta_elo[player_name] = {
-                        'overall': float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'hard': float(hard_elo) if pd.notna(hard_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'clay': float(clay_elo) if pd.notna(clay_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0,
-                        'grass': float(grass_elo) if pd.notna(grass_elo) else float(overall_elo) if pd.notna(overall_elo) else 1500.0
-                    }
+                    try:
+                        # Récupération des ELO par surface avec valeurs par défaut
+                        overall_elo = float(row.get('Elo', 1500)) if pd.notna(row.get('Elo')) else 1500.0
+                        hard_elo = float(row.get('hElo', overall_elo)) if pd.notna(row.get('hElo')) else overall_elo
+                        clay_elo = float(row.get('cElo', overall_elo)) if pd.notna(row.get('cElo')) else overall_elo
+                        grass_elo = float(row.get('gElo', overall_elo)) if pd.notna(row.get('gElo')) else overall_elo
+                        
+                        self.wta_elo[player_name] = {
+                            'overall': overall_elo,
+                            'hard': hard_elo,
+                            'clay': clay_elo,
+                            'grass': grass_elo
+                        }
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Erreur conversion pour {player_name}: {e}")
+                        continue
             
             logger.info(f"Chargé {len(self.atp_elo)} joueurs ATP et {len(self.wta_elo)} joueuses WTA")
             
@@ -92,7 +128,13 @@ class TennisEloBot:
         """Normalise le nom du joueur pour la recherche"""
         if not name:
             return ""
-        return name.lower().strip().replace(".", "").replace("-", " ").replace("'", "")
+        # Normaliser complètement : minuscules, sans accents, sans caractères spéciaux
+        name = name.lower().strip()
+        # Supprimer les caractères spéciaux mais garder les espaces
+        name = name.replace(".", "").replace(",", "").replace("'", "").replace("-", " ")
+        # Supprimer les espaces multiples
+        name = " ".join(name.split())
+        return name
     
     def find_player_elo(self, player_name: str, tour: str) -> Dict:
         """Trouve l'ELO d'un joueur avec recherche flexible"""
