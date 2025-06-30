@@ -34,29 +34,38 @@ class TennisEloBot:
             # Chargement ATP ELO
             atp_df = pd.read_csv(ATP_ELO_FILE)
             for _, row in atp_df.iterrows():
-                player_name = row['player_name'].lower().strip()
-                self.atp_elo[player_name] = {
-                    'hard': row.get('elo_hard', 1500),
-                    'clay': row.get('elo_clay', 1500),
-                    'grass': row.get('elo_grass', 1500),
-                    'overall': row.get('elo_overall', 1500)
-                }
+                # Adaptation aux colonnes de votre fichier ATP
+                if 'Player' in row:
+                    player_name = str(row['Player']).lower().strip()
+                    elo_value = row.get('Elo', 1500)
+                    self.atp_elo[player_name] = {
+                        'hard': elo_value,
+                        'clay': elo_value,
+                        'grass': elo_value,
+                        'overall': elo_value
+                    }
             
-            # Chargement WTA ELO
+            # Chargement WTA ELO - Adaptation car pas de colonne ELO visible
             wta_df = pd.read_csv(WTA_ELO_FILE)
             for _, row in wta_df.iterrows():
-                player_name = row['player_name'].lower().strip()
-                self.wta_elo[player_name] = {
-                    'hard': row.get('elo_hard', 1500),
-                    'clay': row.get('elo_clay', 1500),
-                    'grass': row.get('elo_grass', 1500),
-                    'overall': row.get('elo_overall', 1500)
-                }
+                if 'Player' in row:
+                    player_name = str(row['Player']).lower().strip()
+                    # Estimation ELO basée sur le rang (plus le rang est bas, plus l'ELO est élevé)
+                    rank = row.get('Elo Rank', 100)
+                    estimated_elo = max(1200, 2200 - (rank * 8))  # Formule approximative
+                    self.wta_elo[player_name] = {
+                        'hard': estimated_elo,
+                        'clay': estimated_elo,
+                        'grass': estimated_elo,
+                        'overall': estimated_elo
+                    }
             
             logger.info(f"Chargé {len(self.atp_elo)} joueurs ATP et {len(self.wta_elo)} joueuses WTA")
             
         except Exception as e:
             logger.error(f"Erreur lors du chargement des données ELO: {e}")
+            logger.error(f"Colonnes disponibles ATP: {list(pd.read_csv(ATP_ELO_FILE).columns) if pd.read_csv(ATP_ELO_FILE) is not None else 'Erreur lecture'}")
+            logger.error(f"Colonnes disponibles WTA: {list(pd.read_csv(WTA_ELO_FILE).columns) if pd.read_csv(WTA_ELO_FILE) is not None else 'Erreur lecture'}")
     
     def normalize_player_name(self, name: str) -> str:
         """Normalise le nom du joueur pour la recherche"""
@@ -307,4 +316,4 @@ def main():
     bot.run_daily_analysis()
 
 if __name__ == "__main__":
-    main()
+    main()is 
