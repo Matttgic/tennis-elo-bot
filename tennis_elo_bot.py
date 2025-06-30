@@ -1,14 +1,13 @@
 import pandas as pd
 import requests
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import time
 from typing import Dict, List, Tuple, Optional
 import logging
-
-# Configuration depuis les variables d'environnement (GitHub Actions)
 import os
 
+# Configuration depuis les variables d'environnement
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'VOTRE_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', 'VOTRE_CHAT_ID')
 ODDS_API_KEY = os.getenv('ODDS_API_KEY', 'VOTRE_ODDS_API_KEY')
@@ -163,7 +162,7 @@ class TennisEloBot:
             return 'hard'  # Surface par défaut (dur)
     
     def get_matches_from_odds_api(self) -> List[Dict]:
-        """Récupère les matchs depuis l'API Odds"""
+        """Récupère les matchs depuis l'API Odds - Version corrigée"""
         matches = []
         
         if ODDS_API_KEY == 'VOTRE_ODDS_API_KEY':
@@ -171,50 +170,53 @@ class TennisEloBot:
             return matches
         
         try:
-            # ATP matches
-            atp_url = f"https://api.the-odds-api.com/v4/sports/tennis_atp/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h"
-            logger.info("Récupération des matchs ATP depuis Odds API...")
+            # Utiliser l'endpoint 'upcoming' pour les sports de tennis disponibles
+            base_url = "https://api.the-odds-api.com/v4/sports"
             
-            atp_response = requests.get(atp_url, timeout=10)
+            # D'abord, récupérer la liste des sports disponibles
+            sports_url = f"{base_url}?apiKey={ODDS_API_KEY}"
+            logger.info("Récupération des sports disponibles...")
             
-            if atp_response.status_code == 200:
-                atp_data = atp_response.json()
-                logger.info(f"Reçu {len(atp_data)} matchs ATP potentiels")
+            sports_response = requests.get(sports_url, timeout=10)
+            
+            if sports_response.status_code == 200:
+                sports_data = sports_response.json()
+                tennis_sports = [sport for sport in sports_data if 'tennis' in sport.get('key', '').lower()]
                 
-                for match in atp_data:
-                    if self.is_today(match.get('commence_time', '')):
-                        matches.append({
-                            'player1': match.get('home_team', ''),
-                            'player2': match.get('away_team', ''),
-                            'tour': 'ATP',
-                            'tournament': match.get('sport_title', 'Unknown'),
-                            'commence_time': match.get('commence_time', '')
-                        })
-            else:
-                logger.error(f"Erreur API Odds ATP: {atp_response.status_code} - {atp_response.text}")
-            
-            # WTA matches
-            wta_url = f"https://api.the-odds-api.com/v4/sports/tennis_wta/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h"
-            logger.info("Récupération des matchs WTA depuis Odds API...")
-            
-            wta_response = requests.get(wta_url, timeout=10)
-            
-            if wta_response.status_code == 200:
-                wta_data = wta_response.json()
-                logger.info(f"Reçu {len(wta_data)} matchs WTA potentiels")
+                logger.info(f"Sports de tennis trouvés: {[sport['key'] for sport in tennis_sports]}")
                 
-                for match in wta_data:
-                    if self.is_today(match.get('commence_time', '')):
-                        matches.append({
-                            'player1': match.get('home_team', ''),
-                            'player2': match.get('away_team', ''),
-                            'tour': 'WTA',
-                            'tournament': match.get('sport_title', 'Unknown'),
-                            'commence_time': match.get('commence_time', '')
-                        })
+                # Pour chaque sport de tennis, récupérer les matchs
+                for sport in tennis_sports:
+                    sport_key = sport['key']
+                    odds_url = f"{base_url}/{sport_key}/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h&dateFormat=iso"
+                    
+                    logger.info(f"Récupération des matchs pour {sport_key}...")
+                    
+                    odds_response = requests.get(odds_url, timeout=10)
+                    
+                    if odds_response.status_code == 200:
+                        odds_data = odds_response.json()
+                        logger.info(f"Reçu {len(odds_data)} matchs pour {sport_key}")
+                        
+                        for match in odds_data:
+                            # Vérifier si le match est aujourd'hui ou dans les prochaines 24h
+                            commence_time = match.get('commence_time', '')
+                            if self.is_within_next_24h(commence_time):
+                                # Déterminer si c'est ATP ou WTA
+                                tour = 'ATP' if 'atp' in sport_key.lower() else 'WTA' if 'wta' in sport_key.lower() else 'Unknown'
+                                
+                                matches.append({
+                                    'player1': match.get('home_team', ''),
+                                    'player2': match.get('away_team', ''),
+                                    'tour': tour,
+                                    'tournament': sport.get('title', 'Unknown'),
+                                    'commence_time': commence_time
+                                })
+                    else:
+                        logger.warning(f"Erreur pour {sport_key}: {odds_response.status_code}")
             else:
-                logger.error(f"Erreur API Odds WTA: {wta_response.status_code} - {wta_response.text}")
-            
+                logger.error(f"Erreur récupération sports: {sports_response.status_code}")
+                
         except Exception as e:
             logger.error(f"Erreur lors de la récupération depuis Odds API: {e}")
             import traceback
@@ -268,6 +270,29 @@ class TennisEloBot:
         logger.info(f"Total matchs Tennis API: {len(matches)}")
         return matches
     
+    def is_within_next_24h(self, date_string: str) -> bool:
+        """Vérifie si la date est dans les prochaines 24 heures"""
+        if not date_string:
+            return False
+            
+        try:
+            # Parser la date ISO
+            if date_string.endswith('Z'):
+                match_datetime = datetime.fromisoformat(date_string.replace('Z', '+00:00'))
+            else:
+                match_datetime = datetime.fromisoformat(date_string)
+            
+            # Obtenir l'heure actuelle
+            now = datetime.now(match_datetime.tzinfo)
+            
+            # Vérifier si c'est dans les prochaines 24h
+            time_diff = match_datetime - now
+            return timedelta(hours=0) <= time_diff <= timedelta(hours=24)
+            
+        except Exception as e:
+            logger.debug(f"Impossible de parser la date '{date_string}': {e}")
+            return False
+    
     def is_today(self, date_string: str) -> bool:
         """Vérifie si la date correspond à aujourd'hui"""
         if not date_string:
@@ -276,294 +301,3 @@ class TennisEloBot:
         try:
             # Différents formats de date possibles
             formats = [
-                '%Y-%m-%dT%H:%M:%SZ',
-                '%Y-%m-%d %H:%M:%S',
-                '%Y-%m-%d',
-                '%Y-%m-%dT%H:%M:%S'
-            ]
-            
-            for fmt in formats:
-                try:
-                    if 'T' in date_string and date_string.endswith('Z'):
-                        match_date = datetime.strptime(date_string, '%Y-%m-%dT%H:%M:%SZ').date()
-                    else:
-                        match_date = datetime.strptime(date_string, fmt).date()
-                    
-                    return match_date == date.today()
-                except ValueError:
-                    continue
-            
-            # Fallback: essayer de parser avec fromisoformat
-            match_date = datetime.fromisoformat(date_string.replace('Z', '+00:00')).date()
-            return match_date == date.today()
-            
-        except Exception as e:
-            logger.debug(f"Impossible de parser la date '{date_string}': {e}")
-            return False
-    
-    def calculate_elo_differences(self, matches: List[Dict]) -> List[Dict]:
-        """Calcule les différences d'ELO pour chaque match"""
-        match_analyses = []
-        
-        for match in matches:
-            try:
-                if not match.get('player1') or not match.get('player2'):
-                    logger.warning(f"Match avec joueurs manquants: {match}")
-                    continue
-                
-                surface = self.get_surface_from_tournament(match.get('tournament', ''))
-                
-                player1_elo_data = self.find_player_elo(match['player1'], match.get('tour', 'ATP'))
-                player2_elo_data = self.find_player_elo(match['player2'], match.get('tour', 'ATP'))
-                
-                player1_elo = player1_elo_data.get(surface, player1_elo_data.get('overall', 1500))
-                player2_elo = player2_elo_data.get(surface, player2_elo_data.get('overall', 1500))
-                
-                elo_diff = abs(player1_elo - player2_elo)
-                
-                match_analyses.append({
-                    'player1': match['player1'],
-                    'player1_elo': player1_elo,
-                    'player2': match['player2'],
-                    'player2_elo': player2_elo,
-                    'surface': surface,
-                    'elo_difference': elo_diff,
-                    'tour': match.get('tour', 'Unknown'),
-                    'tournament': match.get('tournament', 'Unknown'),
-                    'commence_time': match.get('commence_time', '')
-                })
-                
-            except Exception as e:
-                logger.error(f"Erreur calcul ELO pour {match}: {e}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Tri par différence d'ELO décroissante
-        sorted_matches = sorted(match_analyses, key=lambda x: x['elo_difference'], reverse=True)
-        logger.info(f"Analysé {len(sorted_matches)} matchs avec succès")
-        
-        return sorted_matches
-    
-    def format_telegram_message(self, matches: List[Dict]) -> str:
-        """Formate le message pour Telegram"""
-        if not matches:
-            return f"🎾 Aucun match trouvé pour aujourd'hui ({date.today().strftime('%d/%m/%Y')})"
-        
-        message = f"🎾 **MATCHS TENNIS DU {date.today().strftime('%d/%m/%Y')}**\n"
-        message += f"📊 Classés par écart d'ELO (du plus grand au plus petit)\n\n"
-        
-        for i, match in enumerate(matches[:20], 1):  # Limiter à 20 matchs pour éviter les messages trop longs
-            higher_elo_player = match['player1'] if match['player1_elo'] > match['player2_elo'] else match['player2']
-            lower_elo_player = match['player2'] if match['player1_elo'] > match['player2_elo'] else match['player1']
-            higher_elo = max(match['player1_elo'], match['player2_elo'])
-            lower_elo = min(match['player1_elo'], match['player2_elo'])
-            
-            # Icône selon l'écart
-            if match['elo_difference'] > 200:
-                icon = "🔥"  # Très gros écart
-            elif match['elo_difference'] > 100:
-                icon = "⚡"  # Gros écart
-            elif match['elo_difference'] > 50:
-                icon = "📈"  # Écart moyen
-            else:
-                icon = "⚖️"  # Petit écart
-            
-            message += f"{icon} **Match {i}** ({match['tour']})\n"
-            message += f"🏆 {higher_elo_player} ({higher_elo:.0f})\n"
-            message += f"🆚 {lower_elo_player} ({lower_elo:.0f})\n"
-            message += f"🎯 Surface: {match['surface'].title()}\n"
-            message += f"📈 Écart ELO: **{match['elo_difference']:.0f}**\n"
-            message += f"🏟️ {match['tournament']}\n\n"
-        
-        if len(matches) > 20:
-            message += f"... et {len(matches) - 20} autres matchs\n\n"
-        
-        message += f"🤖 Analyse basée sur {len(self.atp_elo)} joueurs ATP et {len(self.wta_elo)} joueuses WTA"
-        
-        return message
-    
-    def send_telegram_message(self, message: str):
-        """Envoie le message sur Telegram"""
-        if TELEGRAM_BOT_TOKEN == 'VOTRE_BOT_TOKEN':
-            logger.warning("Token Telegram non configuré - affichage du message:")
-            print("\n" + "="*50)
-            print("MESSAGE TELEGRAM:")
-            print("="*50)
-            print(message)
-            print("="*50)
-            return
-        
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            
-            # Diviser le message si trop long (limite Telegram: 4096 caractères)
-            max_length = 4000  # Marge de sécurité
-            
-            if len(message) > max_length:
-                # Diviser le message en parties
-                parts = []
-                current_part = ""
-                
-                for line in message.split('\n'):
-                    if len(current_part) + len(line) + 1 > max_length:
-                        if current_part:
-                            parts.append(current_part)
-                        current_part = line
-                    else:
-                        current_part += ('\n' if current_part else '') + line
-                
-                if current_part:
-                    parts.append(current_part)
-                
-                logger.info(f"Message divisé en {len(parts)} parties")
-                
-                for i, part in enumerate(parts, 1):
-                    payload = {
-                        'chat_id': TELEGRAM_CHAT_ID,
-                        'text': f"[{i}/{len(parts)}]\n{part}" if len(parts) > 1 else part,
-                        'parse_mode': 'Markdown'
-                    }
-                    
-                    response = requests.post(url, json=payload)
-                    
-                    if response.status_code == 200:
-                        logger.info(f"Partie {i}/{len(parts)} envoyée avec succès")
-                    else:
-                        logger.error(f"Erreur envoi partie {i}: {response.text}")
-                    
-                    if i < len(parts):  # Pause entre les messages sauf pour le dernier
-                        time.sleep(2)
-            else:
-                payload = {
-                    'chat_id': TELEGRAM_CHAT_ID,
-                    'text': message,
-                    'parse_mode': 'Markdown'
-                }
-                
-                response = requests.post(url, json=payload)
-                
-                if response.status_code == 200:
-                    logger.info("Message envoyé avec succès sur Telegram")
-                else:
-                    logger.error(f"Erreur envoi Telegram: {response.status_code} - {response.text}")
-                    
-        except Exception as e:
-            logger.error(f"Erreur lors de l'envoi du message Telegram: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    def run_daily_analysis(self):
-        """Lance l'analyse quotidienne"""
-        logger.info("="*50)
-        logger.info("DÉBUT DE L'ANALYSE QUOTIDIENNE")
-        logger.info("="*50)
-        
-        # Récupération des matchs depuis les deux APIs
-        all_matches = []
-        
-        # API Odds
-        odds_matches = self.get_matches_from_odds_api()
-        all_matches.extend(odds_matches)
-        
-        # Tennis API
-        tennis_matches = self.get_matches_from_tennis_api()
-        all_matches.extend(tennis_matches)
-        
-        logger.info(f"Total matchs récupérés: {len(all_matches)}")
-        
-        # Suppression des doublons basée sur les joueurs et le tour
-        unique_matches = []
-        seen = set()
-        
-        for match in all_matches:
-            # Créer une clé unique pour détecter les doublons
-            key1 = (
-                self.normalize_player_name(match.get('player1', '')),
-                self.normalize_player_name(match.get('player2', '')),
-                match.get('tour', 'Unknown')
-            )
-            key2 = (
-                self.normalize_player_name(match.get('player2', '')),
-                self.normalize_player_name(match.get('player1', '')),
-                match.get('tour', 'Unknown')
-            )
-            
-            if key1 not in seen and key2 not in seen:
-                unique_matches.append(match)
-                seen.add(key1)
-                seen.add(key2)
-        
-        logger.info(f"Matchs uniques après suppression des doublons: {len(unique_matches)}")
-        
-        if not unique_matches:
-            logger.info("Aucun match trouvé pour aujourd'hui")
-            message = f"🎾 Aucun match de tennis trouvé pour aujourd'hui ({date.today().strftime('%d/%m/%Y')})\n\n"
-            message += "Vérifiez les APIs ou attendez les prochains matchs ! 🕐"
-            self.send_telegram_message(message)
-            return
-        
-        # Calcul des différences d'ELO
-        logger.info("Calcul des différences d'ELO...")
-        analyzed_matches = self.calculate_elo_differences(unique_matches)
-        
-        if not analyzed_matches:
-            logger.warning("Aucun match analysé avec succès")
-            message = f"⚠️ Erreur lors de l'analyse des matchs du {date.today().strftime('%d/%m/%Y')}\n\n"
-            message += "Les données ELO n'ont pas pu être récupérées correctement."
-            self.send_telegram_message(message)
-            return
-        
-        # Formatage et envoi du message
-        logger.info("Formatage du message Telegram...")
-        telegram_message = self.format_telegram_message(analyzed_matches)
-        
-        logger.info("Envoi du message sur Telegram...")
-        self.send_telegram_message(telegram_message)
-        
-        logger.info("="*50)
-        logger.info("ANALYSE QUOTIDIENNE TERMINÉE")
-        logger.info(f"- {len(unique_matches)} matchs trouvés")
-        logger.info(f"- {len(analyzed_matches)} matchs analysés avec succès")
-        logger.info("="*50)
-
-
-def main():
-    """Fonction principale"""
-    try:
-        logger.info("Initialisation du Tennis ELO Bot...")
-        bot = TennisEloBot()
-        
-        logger.info("Lancement de l'analyse quotidienne...")
-        bot.run_daily_analysis()
-        
-        logger.info("Script terminé avec succès !")
-        
-    except Exception as e:
-        logger.error(f"Erreur fatale dans le script principal: {e}")
-        import traceback
-        logger.error(f"Traceback complet: {traceback.format_exc()}")
-        
-        # Tentative d'envoi d'un message d'erreur si possible
-        try:
-            if TELEGRAM_BOT_TOKEN != 'VOTRE_BOT_TOKEN':
-                error_message = f"🚨 **ERREUR TENNIS BOT** 🚨\n\n"
-                error_message += f"Le script a rencontré une erreur fatale:\n"
-                error_message += f"`{str(e)}`\n\n"
-                error_message += f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-                
-                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                payload = {
-                    'chat_id': TELEGRAM_CHAT_ID,
-                    'text': error_message,
-                    'parse_mode': 'Markdown'
-                }
-                
-                requests.post(url, json=payload)
-        except:
-            pass  # Ignore les erreurs lors de l'envoi du message d'erreur
-        
-        raise
-
-
-if __name__ == "__main__":
-    main()
