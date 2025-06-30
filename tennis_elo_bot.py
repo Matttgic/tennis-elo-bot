@@ -6,6 +6,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 import logging
 import os
+import unicodedata
 
 # Configuration depuis les variables d'environnement
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'VOTRE_BOT_TOKEN')
@@ -51,6 +52,8 @@ class TennisEloBot:
             for _, row in atp_df.iterrows():
                 if pd.notna(row.get('Player')):
                     player_name = str(row['Player']).lower().strip()
+                    # Stocker aussi la version sans accents pour la recherche
+                    player_name_normalized = self.remove_accents(player_name)
                     
                     try:
                         # Récupération des ELO par surface avec valeurs par défaut
@@ -59,12 +62,18 @@ class TennisEloBot:
                         clay_elo = float(row.get('cElo', overall_elo)) if pd.notna(row.get('cElo')) else overall_elo
                         grass_elo = float(row.get('gElo', overall_elo)) if pd.notna(row.get('gElo')) else overall_elo
                         
-                        self.atp_elo[player_name] = {
+                        elo_data = {
                             'overall': overall_elo,
                             'hard': hard_elo,
                             'clay': clay_elo,
                             'grass': grass_elo
                         }
+                        
+                        # Stocker avec le nom original et la version normalisée
+                        self.atp_elo[player_name] = elo_data
+                        if player_name != player_name_normalized:
+                            self.atp_elo[player_name_normalized] = elo_data
+                            
                     except (ValueError, TypeError) as e:
                         logger.debug(f"Erreur conversion pour {player_name}: {e}")
                         continue
@@ -90,6 +99,8 @@ class TennisEloBot:
             for _, row in wta_df.iterrows():
                 if pd.notna(row.get('Player')):
                     player_name = str(row['Player']).lower().strip()
+                    # Stocker aussi la version sans accents pour la recherche
+                    player_name_normalized = self.remove_accents(player_name)
                     
                     try:
                         # Récupération des ELO par surface avec valeurs par défaut
@@ -98,12 +109,18 @@ class TennisEloBot:
                         clay_elo = float(row.get('cElo', overall_elo)) if pd.notna(row.get('cElo')) else overall_elo
                         grass_elo = float(row.get('gElo', overall_elo)) if pd.notna(row.get('gElo')) else overall_elo
                         
-                        self.wta_elo[player_name] = {
+                        elo_data = {
                             'overall': overall_elo,
                             'hard': hard_elo,
                             'clay': clay_elo,
                             'grass': grass_elo
                         }
+                        
+                        # Stocker avec le nom original et la version normalisée
+                        self.wta_elo[player_name] = elo_data
+                        if player_name != player_name_normalized:
+                            self.wta_elo[player_name_normalized] = elo_data
+                            
                     except (ValueError, TypeError) as e:
                         logger.debug(f"Erreur conversion pour {player_name}: {e}")
                         continue
@@ -124,12 +141,22 @@ class TennisEloBot:
             import traceback
             logger.error(f"Traceback complet: {traceback.format_exc()}")
     
+    def remove_accents(self, text: str) -> str:
+        """Supprime les accents d'un texte"""
+        if not text:
+            return ""
+        # Normaliser en NFD (décomposition) puis filtrer les marques diacritiques
+        return ''.join(c for c in unicodedata.normalize('NFD', text) 
+                       if unicodedata.category(c) != 'Mn')
+    
     def normalize_player_name(self, name: str) -> str:
         """Normalise le nom du joueur pour la recherche"""
         if not name:
             return ""
         # Normaliser complètement : minuscules, sans accents, sans caractères spéciaux
         name = name.lower().strip()
+        # Supprimer les accents
+        name = self.remove_accents(name)
         # Supprimer les caractères spéciaux mais garder les espaces
         name = name.replace(".", "").replace(",", "").replace("'", "").replace("-", " ")
         # Supprimer les espaces multiples
