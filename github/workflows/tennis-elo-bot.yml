@@ -1,1 +1,36 @@
+# .github/workflows/tennis-elo-bot.yml
+name: Tennis ELO Bot
 
+on:
+  schedule:
+    # S'exécute tous les jours à 6h00 UTC (8h00 Paris)
+    - cron: '0 6 * * *'
+  
+  # Permet de lancer manuellement depuis GitHub
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        pip install pandas requests python-telegram-bot
+    
+    - name: Run Tennis ELO Bot
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        TENNIS_API_KEY: ${{ secrets.TENNIS_API_KEY }}
+      run: |
+        python tennis_elo_bot.py
